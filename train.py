@@ -61,19 +61,38 @@ class StyleTransferModel(tf.keras.Model):
 		super(StyleTransferModel, self).__init__()
 		self.vgg19 = run.VGGModel()
 		self.vgg19.trainable = False
-		# TODO: Initialize the real transform net
 		self.transform = TransformNet()
+		self.transform.trainable = True
 	
 	def call(self, img):
-		return None
+		img = self.transform(img)
+		feature_map = self.vgg19(img)
+		return feature_map
 
 '''
 	For convenience: I guess multi-style only
 '''
 @tf.function
 def get_loss(feature_map):
-	return None
+	return run.get_loss(feature_map)
+
+@tf.function
+def train_step(image):
+	with tf.GradientTape() as g:
+		feature_map = model(image)
+		loss = get_loss(feature_map)
+	grad = g.gradient(loss, train_vars)
+	run.optimizer.apply_gradients(zip(grad, train_vars))
+	return loss
 
 def main():
-	# TODO: Flowchart
-	return None
+	global train_vars
+	model = StyleTransferModel()
+	train_vars = model.trainable_variable
+	# TODO: Generate data for content
+	data_gen = tf.keras.preprocessing.image.ImageDataGenerator()
+	data_gen = data_gen.flow_from_directory("./train_data", target_size=(hp.img_size, hp.img_size), batch_size=1)
+	# TODO: Train the net
+
+if __name__ == "__main__":
+	main()
