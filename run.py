@@ -16,7 +16,7 @@ style_image_path = './trivial_data/starry-sky.jpg'
 generate_image_path = ['./trivial_result/output_noise', './trivial_result/output_content']
 generate_image_path_ext = '.jpg'
 
-content_layers_name = ['block2_conv2', 'block4_conv2']
+content_layers_name = ['block4_conv2']
 style_layers_name = ['block1_conv1', 'block2_conv1', 'block3_conv1', 'block4_conv1', 'block5_conv1']
 
 optimizer = tf.keras.optimizers.RMSprop(
