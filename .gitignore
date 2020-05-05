@@ -2,3 +2,4 @@ data/*
 paper/*
 results/*
 __pycache__/*
+.*
