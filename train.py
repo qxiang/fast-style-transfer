@@ -1,155 +1,91 @@
-"""
-Final Project - Style Transfer
-CS1430 - Computer Vision
-Brown University
-"""
-
-import time
-import numpy as np
-import tensorflow as tf
-import hyperparameters as hp
-from run import preprocess, postprocess
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from tensorflow.keras.layers import Conv2D, Conv2DTranspose, BatchNormalization, Activation
 import ssl
+import torch
+import torch.nn.functional as F
+import hyperparameters as hp
+from torchvision.models import vgg16
+from torchvision import transforms
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
-model = None
-target_image = None
-optimizer = tf.keras.optimizers.Adam(
-				learning_rate=hp.learning_rate * 1e-4,
-				momentum=hp.momentum)
-target_path = "./trivial_result/output_content.jpg"
 
-class ResBlock(tf.keras.Model):
-	def __init__(self):
-		super().__init__()
-		self.model = [
-			Conv2D(128, 3, 1, padding="same", name="block2_conv1"),
-			BatchNormalization(),
-			Activation('relu'),
-			Conv2D(128, 3, 1, padding="same", name="block2_conv2"),
-			BatchNormalization()
-		]
-		self.activation = Activation('relu')
+features = []
 
-	def call(self, img):
-		residual = img
-		for layer in self.model:
-			img = layer(img)
-		return self.activation(img + residual)
+def _content_loss(input, target):
+    return F.mse_loss(input, target)
 
-class TransformNet(tf.keras.Model):
-	def __init__(self):
-		super().__init__()
-		self.conv_step = [
-			Conv2D(32, 3, 2, padding="same", name="block1_conv1"),
-			BatchNormalization(),
-			Activation('relu'),
-			Conv2D(64, 3, 2, padding="same", name="block1_conv2"),
-			BatchNormalization(),
-			Activation('relu'),
-			Conv2D(128, 3, 2, padding="same", name="block1_conv3"),
-			BatchNormalization(),
-			Activation('relu')
-		]
-		self.res_step = [ResBlock(), ResBlock(), ResBlock(), ResBlock(), ResBlock()]
-		self.deconv_step = [
-			Conv2DTranspose(64, 3, 2, padding="same", name="block3_conv1"),
-			BatchNormalization(),
-			Activation('relu'),
-			Conv2DTranspose(32, 3, 2, padding="same", name="block3_conv2"),
-			BatchNormalization(),
-			Activation('relu'),
-			Conv2DTranspose(3, 1, 2, padding="same", name="block3_conv3"),
-			BatchNormalization(),
-			Activation('tanh')
-		]
-		self.model = self.conv_step + self.res_step + self.deconv_step
-	
-	def call(self, img):
-		for layer in self.model:
-			img = layer(img)
-		return img
+def _gram(input):
+    b, c, w, h = input.size()
 
-class VGGModel(tf.keras.Model):
-	def __init__(self):
-		super().__init__()
-		self.content_layers_name = ['block2_conv2']
-		
-		self.style_layers_name = ['block1_conv2', 'block2_conv2', 'block3_conv3', 'block4_conv3'] 
-		# Architecture 
-		self.vgg = tf.keras.applications.VGG16(include_top=False, weights='imagenet') 
-		self.vgg = tf.keras.Model(inputs=[self.vgg.input], 
-			outputs=[self.vgg.get_layer(name).output for name in (self.content_layers_name + self.style_layers_name)])
-		self.vgg.trainable = False 
-	
-	def call(self, img):
-		""" Passes the image through the network. """
-		result = self.vgg(img)
-		content, style = result[0], result[1:len(result)]
-		style = [x[0] for x in style]
-		return content, style
+    if b == 1:
+        input = input.repeat(hp.batch_sz, 1, 1, 1)
+        b = hp.batch_sz
 
-class StyleTransferModel(tf.keras.Model):
-	def __init__(self, image, style):
-		super().__init__()
-		self.vgg = VGGModel()
-		self.transform = TransformNet()
-		self.image = image
-		self.content_target, self.style_target = self.call(image)[0], self.call(style)[1]
-	
-	def call(self, image):
-		return self.vgg(self.transform(image))
+    features = input.view(b * c, w * h)
+    return torch.mm(features, features.t()).div(b * c * w * h)
 
-	def get_transfer_img(self):
-		return self.transform(self.image)
+def _style_loss(input, target):
+    return F.mse_loss(_gram(input), _gram(target))
 
-	def content_loss(self, content):
-		loss = 0
-		num = 0
-		for feat, feat_target in zip(content, self.content_target):
-			loss += tf.reduce_sum(tf.square(feat - feat_target))
-			num += tf.size(feat, out_type=tf.dtypes.float32)
-		return loss / num
+def _total_loss(input_feats, target_feats):
+    content_loss = _content_loss(input_feats[2], target_feats[2])
 
-	def style_loss(self, style):
-		loss = 0
-		num = 0
-		for feat, feat_target in zip(style, self.style_target):
-			loss += tf.reduce_sum(tf.square(gram(feat) - gram(feat_target)))
-			num += tf.size(feat, out_type=tf.dtypes.float32)
-		return loss / num
+    style_loss = 0
+    for in_s, tar_s in zip(input_feats, target_feats):
+        style_loss += _style_loss(in_s, tar_s)
+    
+    return hp.content_weight * content_loss + hp.style_weight * style_loss
 
-	def get_loss(self):
-		content, style = self.call(self.image)
-		loss = hp.alpha * self.content_loss(content) + hp.beta * self.style_loss(style)
-		return loss
+def _first_hook(module, input, output):
+    features.clear()
+    features.append(output)
 
-def gram(style):
-	return tf.tensordot(style, style, axes=(0, 1)) 
+def _hook(module, input, output):
+    features.append(output)
+ 
+def _hooked_cnn(device):
+    cnn = vgg16(pretrained=True).features.to(device).eval()
+    layers_hook = ['3', '8', '15', '22']
+    for name, module in cnn.named_modules():
+        if name == layers_hook[0]:
+            module.register_forward_hook(_first_hook)
+        elif name in layers_hook:
+            module.register_forward_hook(_hook)
 
-def train_step(model):
-	with tf.GradientTape() as g:
-		loss = model.get_loss()
+    return cnn
 
-	train_vars = model.trainable_variables
-	grad = g.gradient(loss, train_vars)
-	optimizer.apply_gradients(zip(grad, train_vars))
-	return loss 
 
-def main():
-	content_image_path = './trivial_data/buildings.jpg'
-	style_image_path = './trivial_data/starry-sky.jpg'
-	content_image, style_image = preprocess(content_image_path), preprocess(style_image_path)
-	model = StyleTransferModel(content_image, style_image)
-	for step in range(5):
-		loss = train_step(model)
-		tf.print(loss)
-	image = model.get_transfer_img()	
-	image = postprocess(image)
-	image.save("./trivial_result/new_result.jpg")
+def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
+    # Import the vgg model.
+    cnn = _hooked_cnn(device)
+    norm_trans = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
-if __name__ == "__main__":
-	main()
+    cnn(style_img)
+    target_feats = features.copy()
+
+    for epoch in range(num_epochs):
+        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        print('-' * 10)
+        for i, (img, cap) in enumerate(dataloader):
+            img = img.to(device)
+            optimizer.zero_grad()
+            cnn(img)
+            target_feats[2] = features[2]
+            new_img = model(img)
+            cnn(new_img)
+            input_feats = features.copy()
+            loss = _total_loss(input_feats, target_feats)
+            loss.backward(retain_graph=True)
+            if i % 100 == 0:
+                print("Loss : {:4f}".format(loss.item()))
+                save_image(i, img[0], new_img[0])
+            optimizer.step()
+
+def save_image(i, img, new_img):
+    postprocess = transforms.Compose([
+        transforms.Normalize([0, 0, 0], [1 / 0.229, 1 / 0.224, 1 / 0.225]),
+        transforms.Normalize([-0.485, -0.456, -0.406], [1, 1, 1]),
+        transforms.ToPILImage()
+    ])
+
+    postprocess(img.view(3, 256, 256)).save("result/original"+ str(i) + ".jpg")
+    postprocess(new_img.view(3, 256, 256)).save("result/new"+ str(i) + ".jpg")
