@@ -78,6 +78,7 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
             if i % 100 == 0:
                 print("Loss : {:4f}".format(loss.item()))
                 save_image(i, img[0], new_img[0])
+                torch.save(model.state_dict(), "checkpoints/checkpoint" + str(i) + ".pt")
             optimizer.step()
 
 def save_image(i, img, new_img):
@@ -87,5 +88,5 @@ def save_image(i, img, new_img):
         transforms.ToPILImage()
     ])
 
-    postprocess(img.view(3, 256, 256)).save("result/original"+ str(i) + ".jpg")
-    postprocess(new_img.view(3, 256, 256)).save("result/new"+ str(i) + ".jpg")
+    postprocess(img.view(3, 256, 256)).save("results/original"+ str(i) + ".jpg")
+    postprocess(new_img.view(3, 256, 256)).save("results/new"+ str(i) + ".jpg")

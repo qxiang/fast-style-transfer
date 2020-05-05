@@ -43,6 +43,8 @@ def main():
     # Train the model with the COCO dataset.
     train_model(model, coco_loader, style_img, optimizer, hp.num_epochs, device)
 
+    torch.save(model.state_dict(), "checkpoints/model_weights.pt")
+
 
 if __name__ == "__main__":
     main()
