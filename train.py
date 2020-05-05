@@ -11,7 +11,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 features = []
 
 def _content_loss(input, target):
-    return F.mse_loss(input, target)
+    return F.mse_loss(input, target.detach())
 
 def _gram(input):
     b, c, w, h = input.size()
@@ -24,7 +24,7 @@ def _gram(input):
     return torch.mm(features, features.t()).div(b * c * w * h)
 
 def _style_loss(input, target):
-    return F.mse_loss(_gram(input), _gram(target))
+    return F.mse_loss(_gram(input), _gram(target).detach())
 
 def _total_loss(input_feats, target_feats):
     content_loss = _content_loss(input_feats[2], target_feats[2])
@@ -33,7 +33,7 @@ def _total_loss(input_feats, target_feats):
     for in_s, tar_s in zip(input_feats, target_feats):
         style_loss += _style_loss(in_s, tar_s)
     
-    return hp.content_weight * content_loss + hp.style_weight * style_loss
+    return content_loss, style_loss
 
 def _first_hook(module, input, output):
     features.clear()
@@ -57,8 +57,9 @@ def _hooked_cnn(device):
 def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
     # Import the vgg model.
     cnn = _hooked_cnn(device)
-    norm_trans = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
+    cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).view(-1, 1, 1).to(device)
+    cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).view(-1, 1, 1).to(device)
     cnn(style_img)
     target_feats = features.copy()
 
@@ -70,16 +71,20 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
             optimizer.zero_grad()
             cnn(img)
             target_feats[2] = features[2]
-            new_img = model(img)
+            new_img = (model(img)- cnn_normalization_mean) / cnn_normalization_std
             cnn(new_img)
             input_feats = features.copy()
-            loss = _total_loss(input_feats, target_feats)
-            loss.backward(retain_graph=True)
-            if i % 100 == 0:
-                print("Loss : {:4f}".format(loss.item()))
-                save_image(i, img[0], new_img[0])
-                torch.save(model.state_dict(), "checkpoints/checkpoint" + str(i) + ".pt")
+            content_loss, style_loss = _total_loss(input_feats, target_feats)
+            content_loss *= hp.content_weight
+            style_loss *= hp.style_weight
+            loss = content_loss + style_loss
+            loss.backward()
             optimizer.step()
+
+            if i % 100 == 0:
+                print("Batch {} <=>Content Loss : {:4f}, Style Loss : {:4f}".format(i, content_loss.item(), style_loss.item()))
+                save_image(i, img[0].cpu(), new_img[0].cpu())
+                torch.save(model.state_dict(), "checkpoints/checkpoint" + str(i) + ".pt")
 
 def save_image(i, img, new_img):
     postprocess = transforms.Compose([
