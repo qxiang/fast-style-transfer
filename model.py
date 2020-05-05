@@ -10,11 +10,11 @@ class _ResBlock(nn.Module):
     def __init__(self):
         super(_ResBlock, self).__init__()
         self.model = nn.Sequential(
-           nn.Conv2d(128, 128, 3, 1, 1),
-           nn.BatchNorm2d(128),
+           nn.Conv2d(128, 128, 3, 1, 1, padding_mode='reflect'),
+           nn.InstanceNorm2d(128),
            nn.ReLU(),
-           nn.Conv2d(128, 128, 3, 1, 1),
-           nn.BatchNorm2d(128)
+           nn.Conv2d(128, 128, 3, 1, 1, padding_mode='reflect'),
+           nn.InstanceNorm2d(128)
         )
 
     def forward(self, input):
