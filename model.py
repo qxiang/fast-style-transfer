@@ -42,13 +42,13 @@ class TransNet(nn.Module):
         super(TransNet, self).__init__()
         self.model = nn.Sequential(
             # Downsampling subnet.
-            nn.Conv2d(3, 32, 9, 1, 4),
+            nn.Conv2d(3, 32, 9, 1, 4, padding_mode='reflect'),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 3, 2, 1),
+            nn.Conv2d(32, 64, 3, 2, 1, padding_mode='reflect'),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Conv2d(64, 128, 3, 2, 1),
+            nn.Conv2d(64, 128, 3, 2, 1, padding_mode='reflect'),
             nn.BatchNorm2d(128),
             nn.ReLU(),
 
@@ -66,7 +66,7 @@ class TransNet(nn.Module):
             nn.ConvTranspose2d(64, 32, 3, 2, 1, 1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, 9, 1, 4),
+            nn.Conv2d(32, 3, 9, 1, 4, padding_mode='reflect'),
             nn.Tanh()
         )
     
