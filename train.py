@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import hyperparameters as hp
 from torchvision.models import vgg16
 from torchvision import transforms
+from model import NormalNet
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -44,6 +45,9 @@ def _hook(module, input, output):
  
 def _hooked_cnn(device):
     cnn = vgg16(pretrained=True).features.to(device).eval()
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(-1, 1, 1).to(device)
+    std  = torch.tensor([0.229, 0.224, 0.225]).view(-1, 1, 1).to(device)
+ 
     layers_hook = ['3', '8', '15', '22']
     for name, module in cnn.named_modules():
         if name == layers_hook[0]:
@@ -51,15 +55,13 @@ def _hooked_cnn(device):
         elif name in layers_hook:
             module.register_forward_hook(_hook)
 
-    return cnn
+    return torch.nn.Sequential(NormalNet(mean, std).to(device), cnn)
 
 
 def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
     # Import the vgg model.
     cnn = _hooked_cnn(device)
 
-    cnn_normalization_mean = torch.tensor([0.485, 0.456, 0.406]).view(-1, 1, 1).to(device)
-    cnn_normalization_std = torch.tensor([0.229, 0.224, 0.225]).view(-1, 1, 1).to(device)
     cnn(style_img)
     target_feats = features.copy()
 
@@ -71,7 +73,7 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
             optimizer.zero_grad()
             cnn(img)
             target_feats[2] = features[2]
-            new_img = (model(img)- cnn_normalization_mean) / cnn_normalization_std
+            new_img = model(img)
             cnn(new_img)
             input_feats = features.copy()
             content_loss, style_loss = _total_loss(input_feats, target_feats)
@@ -88,8 +90,6 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
 
 def save_image(i, img, new_img):
     postprocess = transforms.Compose([
-        transforms.Normalize([0, 0, 0], [1 / 0.229, 1 / 0.224, 1 / 0.225]),
-        transforms.Normalize([-0.485, -0.456, -0.406], [1, 1, 1]),
         transforms.ToPILImage()
     ])
 

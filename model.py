@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class _ResBlock(nn.Module):
     """
     This is a residual block net, which is
@@ -18,6 +19,17 @@ class _ResBlock(nn.Module):
 
     def forward(self, input):
         return self.model(input) + input
+
+
+class NormalNet(nn.Module):
+    def __init__(self, mean, std):
+        super(NormalNet, self).__init__()
+        self.mean = mean
+        self.std = std
+ 
+    def forward(self, input):
+        return (input - self.mean) / self.std 
+
 
 
 class TransNet(nn.Module):
