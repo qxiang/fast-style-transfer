@@ -27,11 +27,11 @@ def _gram(input):
 def _style_loss(input, target):
     return F.mse_loss(_gram(input), _gram(target).detach())
 
-def _total_loss(input_feats, target_feats):
-    content_loss = _content_loss(input_feats[2], target_feats[2])
+def _total_loss(input_feats, target_content, target_style):
+    content_loss = _content_loss(input_feats[2], target_content[2])
 
     style_loss = 0
-    for in_s, tar_s in zip(input_feats, target_feats):
+    for in_s, tar_s in zip(input_feats, target_style):
         style_loss += _style_loss(in_s, tar_s)
     
     return content_loss, style_loss
@@ -63,7 +63,7 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
     cnn = _hooked_cnn(device)
 
     cnn(style_img)
-    target_feats = features.copy()
+    target_style = features.copy()
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -72,11 +72,11 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
             img = img.to(device)
             optimizer.zero_grad()
             cnn(img)
-            target_feats[2] = features[2]
+            target_content = features.copy()
             new_img = model(img)
             cnn(new_img)
             input_feats = features.copy()
-            content_loss, style_loss = _total_loss(input_feats, target_feats)
+            content_loss, style_loss = _total_loss(input_feats, target_content, target_style)
             content_loss *= hp.content_weight
             style_loss *= hp.style_weight
             loss = content_loss + style_loss
