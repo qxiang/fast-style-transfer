@@ -55,8 +55,8 @@ class TransNet(nn.Module):
             nn.ReLU(),
             nn.BatchNorm2d(32),
             nn.ConvTranspose2d(32, 3, 9, 1, 4),
-            nn.Tanh()
+            nn.Hardtanh(0, 1)
         )
     
     def forward(self, input):
-        return (self.model(input) + 1) / 2
+        return self.model(input)

@@ -25,20 +25,22 @@ def main():
     ann_path = "data/coco/annotations/captions_train2014.json"
     style_path = "data/starry-sky.jpg"
 
+    # Set up the device. Use CUDA if it is available.
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+
+
     # Load images into dataset and set up a data loader with batch size 4.
     coco_dataset = datasets.CocoCaptions(img_path, ann_path, transform=preprocess)
     coco_loader = torch.utils.data.DataLoader(coco_dataset, batch_size=hp.batch_sz, 
         shuffle=True, num_workers=4)
-    style_img = preprocess(Image.open(style_path)).view(1, 3, hp.img_size, hp.img_size)
+    style_img = preprocess(Image.open(style_path)).view(1, 3, hp.img_size, hp.img_size).to(device)
 
     # Set up the model.
-    model = TransNet()
+    model = TransNet().to(device)
  
     # Set up the optimizer.
     optimizer = optim.Adam(model.parameters(), lr=hp.learning_rate)
-
-    # Set up the device. Use CUDA if it is available.
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Train the model with the COCO dataset.
     train_model(model, coco_loader, style_img, optimizer, hp.num_epochs, device)
