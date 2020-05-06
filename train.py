@@ -17,7 +17,7 @@ def _content_loss(input, target):
 def _gram(input):
     a, b, c, d = input.size()
     input = input.view(a, b, c * d)
-    return torch.bmm(input, input.transpose(1, 2)).div(a * b * c * d)
+    return torch.bmm(input, input.transpose(1, 2)).div(b * c * d)
 
 def _style_loss(input, target):
     return F.mse_loss(_gram(input), _gram(target).detach())
