@@ -63,7 +63,7 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
     cnn = _hooked_cnn(device)
 
     cnn(style_img)
-    target_style = features.copy()
+    target_style = copy.deepcopy(features)
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -72,10 +72,10 @@ def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
             img = img.to(device)
             optimizer.zero_grad()
             cnn(img)
-            target_content = features.copy()
+            target_content = copy.deepcopy(features)
             new_img = model(img)
             cnn(new_img)
-            input_feats = features.copy()
+            input_feats = copy.deepcopy(features)
             content_loss, style_loss = _total_loss(input_feats, target_content, target_style)
             content_loss *= hp.content_weight
             style_loss *= hp.style_weight
