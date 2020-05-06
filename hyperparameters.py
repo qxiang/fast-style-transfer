@@ -8,7 +8,7 @@ alpha = 1e+4
 beta = 1.
 
 content_weight = 1
-style_weight = 1e6
+style_weight = 1e5
 
 img_size = 256 
 
