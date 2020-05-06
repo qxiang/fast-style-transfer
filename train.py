@@ -48,7 +48,7 @@ def _hooked_cnn(device):
     mean = torch.tensor([0.485, 0.456, 0.406]).view(-1, 1, 1).to(device)
     std  = torch.tensor([0.229, 0.224, 0.225]).view(-1, 1, 1).to(device)
  
-    layers_hook = ['2', '7', '14', '21']
+    layers_hook = ['3', '8', '15', '22']
     for name, module in cnn.named_modules():
         if name == layers_hook[0]:
             module.register_forward_hook(_first_hook)
