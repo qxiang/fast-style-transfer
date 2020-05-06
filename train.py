@@ -1,98 +1,92 @@
-"""
-Final Project - Style Transfer
-CS1430 - Computer Vision
-Brown University
-"""
-
-import time
-import numpy as np
-import tensorflow as tf
-import PIL
+import ssl
+import torch
+import torch.nn.functional as F
 import hyperparameters as hp
-import run
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
-from tensorflow.keras.layers import Conv2D, Conv2DTranspose, BatchNormalization, Activation, Add
+from torchvision.models import vgg16
+from torchvision import transforms
+from model import NormalNet
 
-class TransformNet(tf.keras.Model):
-	def __init__(self):
-		super(TransformNet, self).__init__()
-		# Optimizer
-		self.optimizer = tf.keras.optimizers.RMSprop(
-			learning_rate=hp.learning_rate,
-			momentum=hp.momentum)
+ssl._create_default_https_context = ssl._create_unverified_context
 
-		self.conv_step = [
-			Conv2D(32, 9, 1, activation="relu", name="block1_conv1"),
-			Conv2D(64, 3, 2, activation="relu", name="block1_conv2"),
-			Conv2D(128, 3, 2, activation="relu", name="block1_conv3"),
-		]
 
-		self.res_block = [
-			Conv2D(64, 3, 1, activation="relu", name="block2_conv1"),
-			BatchNormalization(),
-			Conv2D(64, 3, 2, activation=None, name="block1_conv2"),
-			BatchNormalization(),
-			Add(),
-			Activation('relu')
-		]
+features = []
 
-		self.deconv_step = [
-			Conv2DTranspose(64, 3, 2, activation="relu", name="block3_deconv1"),
-			Conv2DTranspose(32, 3, 2, activation="relu", name="block3_deconv2"),
-			Conv2D(3, 9, 1, activation="relu", name="block3_conv1"),
-		]
-	
-	def call(self, img):
+def _content_loss(input, target):
+    return F.mse_loss(input, target.detach())
 
-		for layer in self.conv_step:
-			img = layer(img)
+def _gram(input):
+    a, b, c, d = input.size()
+    input = input.view(a, b, c * d)
+    return torch.bmm(input, input.transpose(1, 2)).div(b * c * d)
 
-		for i in range(5):
-			for layer in self.res_block:
-				img = layer(img)
+def _style_loss(input, target):
+    return F.mse_loss(_gram(input), _gram(target).detach())
 
-		for layer in self.deconv_step:
-			img = layer(img)
-			
-		return img
+def _total_loss(input_feats, target_content, target_style):
+    content_loss = _content_loss(input_feats[2], target_content[2])
 
-class StyleTransferModel(tf.keras.Model):
-	def __init__(self):
-		super(StyleTransferModel, self).__init__()
-		self.vgg19 = run.VGGModel()
-		self.vgg19.trainable = False
-		self.transform = TransformNet()
-		self.transform.trainable = True
-	
-	def call(self, img):
-		img = self.transform(img)
-		feature_map = self.vgg19(img)
-		return feature_map
+    style_loss = 0
+    for in_s, tar_s in zip(input_feats, target_style):
+        style_loss += _style_loss(in_s, tar_s)
+    
+    return content_loss, style_loss
 
-'''
-	For convenience: I guess multi-style only
-'''
-@tf.function
-def get_loss(feature_map):
-	return run.get_loss(feature_map)
+def _first_hook(module, input, output):
+    features.clear()
+    features.append(output)
 
-@tf.function
-def train_step(image):
-	with tf.GradientTape() as g:
-		feature_map = model(image)
-		loss = get_loss(feature_map)
-	grad = g.gradient(loss, train_vars)
-	run.optimizer.apply_gradients(zip(grad, train_vars))
-	return loss
+def _hook(module, input, output):
+    features.append(output)
+ 
+def _hooked_cnn(device):
+    cnn = vgg16(pretrained=True).features.to(device).eval()
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(-1, 1, 1).to(device)
+    std  = torch.tensor([0.229, 0.224, 0.225]).view(-1, 1, 1).to(device)
+ 
+    layers_hook = ['3', '8', '15', '22']
+    for name, module in cnn.named_modules():
+        if name == layers_hook[0]:
+            module.register_forward_hook(_first_hook)
+        elif name in layers_hook:
+            module.register_forward_hook(_hook)
 
-def main():
-	global train_vars
-	model = StyleTransferModel()
-	train_vars = model.trainable_variable
-	# TODO: Generate data for content
-	data_gen = tf.keras.preprocessing.image.ImageDataGenerator()
-	data_gen = data_gen.flow_from_directory("./train_data", target_size=(hp.img_size, hp.img_size), batch_size=1)
-	# TODO: Train the net
+    return torch.nn.Sequential(NormalNet(mean, std).to(device), cnn)
 
-if __name__ == "__main__":
-	main()
+
+def train_model(model, dataloader, style_img, optimizer, num_epochs, device):
+    # Import the vgg model.
+    cnn = _hooked_cnn(device)
+
+    cnn(style_img)
+    target_style = features.copy()
+
+    for epoch in range(num_epochs):
+        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        print('-' * 10)
+        for i, (img, cap) in enumerate(dataloader):
+            img = img.to(device)
+            optimizer.zero_grad()
+            cnn(img)
+            target_content = features.copy()
+            new_img = model(img)
+            cnn(new_img)
+            input_feats = features.copy()
+            content_loss, style_loss = _total_loss(input_feats, target_content, target_style)
+            content_loss *= hp.content_weight
+            style_loss *= hp.style_weight
+            loss = content_loss + style_loss
+            loss.backward()
+            optimizer.step()
+
+            if i % 100 == 0:
+                print("Batch {} <=>Content Loss : {:4f}, Style Loss : {:4f}".format(i, content_loss.item(), style_loss.item()))
+                save_image(i, img[0].cpu(), new_img[0].cpu())
+                torch.save(model.state_dict(), "checkpoints/checkpoint" + str(i) + ".pt")
+
+def save_image(i, img, new_img):
+    postprocess = transforms.Compose([
+        transforms.ToPILImage()
+    ])
+
+    postprocess(img.view(3, 256, 256)).save("results/original"+ str(i) + ".jpg")
+    postprocess(new_img.view(3, 256, 256)).save("results/new"+ str(i) + ".jpg")
