@@ -15,14 +15,10 @@ def _content_loss(input, target):
     return F.mse_loss(input, target.detach())
 
 def _gram(input):
-    b, c, w, h = input.size()
-
-    if b == 1:
-        input = input.repeat(hp.batch_sz, 1, 1, 1)
-        b = hp.batch_sz
-
-    features = input.view(b * c, w * h)
-    return torch.mm(features, features.t()).div(b * c * w * h)
+    a, b, c, d = input.size()
+    input = input.view(a, b, d * d)
+    x = torch.bmm(input, input.transpose(1, 2)).div(a * b * c * d)
+    return torch.bmm(input, input.transpose(1, 2)).div(a * b * c * d)
 
 def _style_loss(input, target):
     return F.mse_loss(_gram(input), _gram(target).detach())
