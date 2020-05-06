@@ -66,7 +66,7 @@ class TransNet(nn.Module):
             nn.ConvTranspose2d(64, 32, 3, 2, 1, 1),
             nn.InstanceNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 3, 9, 1, 4),
+            nn.ConvTranspose2d(32, 3, 9, 1, 4),
             nn.Tanh()
         )
     
